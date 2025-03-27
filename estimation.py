@@ -1,0 +1,158 @@
+import json
+import gzip
+import numpy as np 
+import pandas as pd 
+from sklearn.linear_model import LinearRegression, SGDRegressor, Ridge, ElasticNet, Lasso 
+from sklearn.metrics import mean_squared_error 
+from sklearn.impute import SimpleImputer
+import pickle 
+import time 
+
+# --- 1. Data Loading --- 
+
+print("Estimation.py")
+print("Loading data...")
+print("--------------------")
+
+# Start timer for data loading 
+data_start = time.time()
+
+# code to open gzipped json file and read reviews into a list
+input_file = gzip.open("/deac/csc/classes/csc373/data/assignment_5/steam_reviews.json.gz")
+dataset = []
+for l in input_file:
+    d = eval(l)
+    dataset.append(d)
+input_file.close()
+
+# Measure and print data loading time
+data_end = time.time() - data_start
+print(f"Data loaded in {data_end:.2f} seconds.\n")
+
+# Convert the list to a DataFrame 
+df = pd.DataFrame(dataset) 
+
+# --- 2. Data Split ---
+
+# code to split the data (decided to use Pandas since it's more convenient for feature engineering)
+split_idx = int(len(df) * 0.8) 
+train_data = df.iloc[:split_idx].copy() 
+dev_data = df.iloc[split_idx:].copy() 
+
+# Extract year from the date (decided to use Pandas for better performance and error handling)
+train_data['year'] = pd.to_datetime(train_data['date']).dt.year 
+dev_data['year'] = pd.to_datetime(dev_data['date']).dt.year 
+
+# --- 3. Feature Engineering --- 
+
+# Compute review word count as a feature 
+train_data['review_word_count'] = train_data['text'].apply(lambda x: len(x.split()))
+dev_data['review_word_count'] = dev_data['text'].apply(lambda x: len(x.split()))
+
+# Convert early_access to binary feature (boolean)
+train_data['early_access'] = train_data['early_access'].astype(int) 
+dev_data['early_access'] = dev_data['early_access'].astype(int) 
+
+# Feature selection we may want to use 
+features = ['review_word_count', 'products', 'page_order', 'early_access', 'page']   # Removed 'username' and 'product_id'
+target = 'hours' 
+
+# Drop rows with missing values in features or target 
+train_data = train_data.dropna(subset = [target]) # Originally had (subset = features + [target])
+dev_data = dev_data.dropna(subset = [target])
+
+# Set up imputer for missing values 
+imputer = SimpleImputer(strategy = 'mean')
+
+# Fit imputer on training data 
+X_train = imputer.fit_transform(train_data[features].values)
+X_dev = imputer.transform(dev_data[features].values)
+
+# Now extract target values 
+y_train = train_data[target].values
+y_dev = dev_data[target].values
+
+# --- 4. Define Evaluation Metric --- 
+
+def evaluate_model(y_true, y_pred): 
+    """
+    Evaluate the model using MSE and count the number of instances where the prediction is over/under the true value 
+    """
+    mse = mean_squared_error(y_true, y_pred) 
+    under = np.sum(y_pred < y_true) 
+    over = np.sum(y_pred > y_true) 
+    return mse, under, over 
+
+# --- 5. Model-Centric Approaches --- 
+
+# 5.1. Baseline Model 
+model_baseline = LinearRegression() 
+
+baseline_start = time.time()                    # Start timer for baseline model training 
+model_baseline.fit(X_train, y_train) 
+baseline_end = time.time() - baseline_start     # Measure baseline model training time 
+
+pred_baseline = model_baseline.predict(X_dev) 
+mse_base, under_base, over_base = evaluate_model(y_dev, pred_baseline) 
+print(f"Baseline Model Evaluation:")
+print(f"MSE: {mse_base:.2f}")
+print(f"Under: {under_base}")
+print(f"Over: {over_base}")
+print(f"Training Time: {baseline_end:.2f} seconds.\n")
+
+# 5.2. Linear Regression with removed outliers 
+threshold = np.percentile(y_train, 90) 
+mask = train_data[train_data[target] <= threshold] 
+
+X_train_mask = imputer.transform(mask[features].values)
+y_train_mask = mask[target].values
+
+# Now train the model 
+mask_model = LinearRegression() 
+
+mask_start = time.time()                    # Start timer for model training
+mask_model.fit(X_train_mask, y_train_mask) 
+mask_end = time.time() - mask_start         # Measure model training time 
+
+pred_mask = mask_model.predict(X_dev) 
+mse_mask, under_mask, over_mask = evaluate_model(y_dev, pred_mask) 
+print(f"Linear Regression Model w/o Top 10% Outliers:")
+print(f"MSE: {mse_mask:.2f}")
+print(f"Under: {under_mask}")
+print(f"Over: {over_mask}")
+print(f"Training time w/o Outliers: {mask_end:.2f} seconds.\n")
+
+# 5.3. Log transformation of target variable 
+y_train_log = np.log2(y_train + 1) 
+model_log = LinearRegression() 
+
+log_start = time.time()                     # Start timer for model training
+model_log.fit(X_train, y_train_log) 
+log_end = time.time() - log_start           # Measure model training time 
+
+pred_log = np.power(2, model_log.predict(X_dev)) - 1
+mse_log, under_log, over_log = evaluate_model(y_dev, pred_log) 
+print(f"Model with Log Transformation of Target:")
+print(f"MSE: {mse_log:.2f}")
+print(f"Under: {under_log}")
+print(f"Over: {over_log}")
+print(f"Training time w Log Transformation: {log_end:.2f} seconds.\n")
+
+# --- 6. Saving and Testing the Best Pipeline ---
+
+# Assume that based on your criteria the log-transformed model is the best.
+# Save the model pipeline.
+# with open("best_pipeline.pkl", "wb") as f:
+#     pickle.dump(model_log, f)
+
+# # Later, load the saved pipeline and test it on the development dataset.
+# with open("best_pipeline.pkl", "rb") as f:
+#     loaded_model = pickle.load(f)
+
+# # Predict using the loaded model (remember to invert the log-transform)
+# pred_loaded = np.power(2, loaded_model.predict(X_dev)) - 1
+# mse_loaded, under_loaded, over_loaded = evaluate_model(y_dev, pred_loaded)
+# print("\nLoaded Pipeline Evaluation:")
+# print("MSE:", mse_loaded)
+# print("Underpredictions:", under_loaded)
+# print("Overpredictions:", over_loaded)
