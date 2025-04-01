@@ -1,3 +1,25 @@
+"""
+estimation.py - Estimation of Game-Playing Time from Steam Reviews
+
+This script performs descriptive data mining on video game reviews from the Steam platform.
+- Loads and preprocesses a large dataset of game reviews.
+- Engineers features such as review word count and early access flag.
+- Splits the data into training and development subsets.
+- Implements various regression models including:
+    - Baseline Linear Regression
+    - Linear Regression with Outlier Removal
+    - Log-Transformed Target Regression
+    - ElasticNet with Hyperparameter Tuning
+- Saves and reloads the best-performing pipeline for further testing.
+
+Acknowledgements:
+This project is part of a Computer Science course on Data Mining.
+Special thanks to the CSC373 faculty for guidance and for providing the dataset.
+
+Author: Dario Santiago Lopez, Anthony Roca, and ChatGPT
+Date: April 2, 2025
+"""
+
 import json
 import gzip
 import numpy as np 
@@ -5,6 +27,9 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression, SGDRegressor, Ridge, ElasticNet, Lasso 
 from sklearn.metrics import mean_squared_error 
 from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler 
+from sklearn.pipeline import Pipeline 
+from sklearn.model_selection import GridSearchCV, cross_val_score, train_test_split
 import pickle 
 import time 
 
@@ -120,7 +145,7 @@ print(f"Linear Regression Model w/o Top 10% Outliers:")
 print(f"MSE: {mse_mask:.2f}")
 print(f"Under: {under_mask}")
 print(f"Over: {over_mask}")
-print(f"Training time w/o Outliers: {mask_end:.2f} seconds.\n")
+print(f"Training time: {mask_end:.2f} seconds.\n")
 
 # 5.3. Log transformation of target variable 
 y_train_log = np.log2(y_train + 1) 
@@ -136,23 +161,82 @@ print(f"Model with Log Transformation of Target:")
 print(f"MSE: {mse_log:.2f}")
 print(f"Under: {under_log}")
 print(f"Over: {over_log}")
-print(f"Training time w Log Transformation: {log_end:.2f} seconds.\n")
+print(f"Training time: {log_end:.2f} seconds.\n")
+
+# 5.4. Pipeline with StandardScaler 
+
+pipeline = Pipeline([ 
+    ('imputer', SimpleImputer(strategy = 'mean')), 
+    ('scaler', StandardScaler()), 
+    ('regressor', LinearRegression())
+])
+
+# Fit the pipeline on the training data 
+pipe_start = time.time()                   # Start timer for pipeline training  
+pipeline.fit(train_data[features].values, y_train)
+pipe_end = time.time() - pipe_start        # Measure pipeline training time 
+
+# Predict of the development data 
+pred_pipeline = pipeline.predict(dev_data[features].values)
+mse_pipeline, under_pipeline, over_pipeline = evaluate_model(y_dev, pred_pipeline) 
+print("Pipeline Model w Imputer and StandardScaler:")
+print(f"MSE: {mse_pipeline:.2f}")
+print(f"Under: {under_pipeline:.2f}")
+print(f"Over: {over_pipeline:.2f}")
+print(f"Training time: {pipe_end:.2f} seconds. \n")
+
+# 5.5. ElasticNet with GridSeearchCV 
+
+# Set up the pipeline with ElasticNet
+pipeline_en = Pipeline([ 
+    ('imputer', SimpleImputer(strategy = 'mean')), 
+    ('scaler', StandardScaler()), 
+    ('regressor', ElasticNet(max_iter = 10000))
+])
+
+# Set up the parameter grid for EN 
+param_grid = {
+    'regressor__alpha': [0.1, 1.0, 10.0], 
+    'regressor__l1_ratio': [0.2, 0.5, 0.8] # Try 0.1, 0.5, 0.9 
+}
+
+# Set up the grid search 
+grid_search = GridSearchCV(pipeline_en, param_grid, cv = 5,
+                           scoring = 'neg_mean_squared_error',
+                           verbose = 2, n_jobs = -1)
+
+# Fit the grid search on the training data and take the time 
+grid_start = time.time()
+grid_search.fit(train_data[features].values, y_train)
+grid_end = time.time() - grid_start
+best_model = grid_search.best_estimator_ 
+
+# Predict using the best model 
+pred_en = best_model.predict(dev_data[features].values) 
+mse_en, under_en, over_en = evaluate_model(y_dev, pred_en)
+print("ElasticNet Model with Hyperparameter Tuning:")
+print(f"Best Parameters: {grid_search.best_params_}")
+print(f"MSE: {mse_en:.2f}")
+print(f"Underpredictions: {under_en:.2f}")
+print(f"Overpredictions: {over_en:.2f}")
+print(f"Training time: {grid_end:.2f} seconds.\n")
 
 # --- 6. Saving and Testing the Best Pipeline ---
 
 # Assume that based on your criteria the log-transformed model is the best.
 # Save the model pipeline.
-# with open("best_pipeline.pkl", "wb") as f:
-#     pickle.dump(model_log, f)
+with open("best_pipeline.pkl", "wb") as f:
+    pickle.dump(model_log, f)
 
-# # Later, load the saved pipeline and test it on the development dataset.
-# with open("best_pipeline.pkl", "rb") as f:
-#     loaded_model = pickle.load(f)
+# Later, load the saved pipeline and test it on the development dataset.
+with open("best_pipeline.pkl", "rb") as f:
+    loaded_model = pickle.load(f)
 
-# # Predict using the loaded model (remember to invert the log-transform)
-# pred_loaded = np.power(2, loaded_model.predict(X_dev)) - 1
-# mse_loaded, under_loaded, over_loaded = evaluate_model(y_dev, pred_loaded)
-# print("\nLoaded Pipeline Evaluation:")
-# print("MSE:", mse_loaded)
-# print("Underpredictions:", under_loaded)
-# print("Overpredictions:", over_loaded)
+# Predict using the loaded model (remember to invert the log-transform)
+pred_loaded = np.power(2, loaded_model.predict(X_dev)) - 1
+mse_loaded, under_loaded, over_loaded = evaluate_model(y_dev, pred_loaded)
+print("Loaded Pipeline Evaluation:")
+print("MSE:", mse_loaded)
+print("Underpredictions:", under_loaded)
+print("Overpredictions:", over_loaded)
+print("")
