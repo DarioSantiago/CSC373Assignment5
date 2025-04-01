@@ -67,12 +67,12 @@ dev_data['year'] = pd.to_datetime(dev_data['date']).dt.year
 # Debugging: Ensure 'hours' is numeric and remove missing values
 # -------------------------------
 # Convert 'hours' to numeric (if not already) and coerce errors to NaN
-train_data['hours'] = pd.to_numeric(train_data['hours'], errors='coerce')
-dev_data['hours'] = pd.to_numeric(dev_data['hours'], errors='coerce')
+train_data['hours'] = pd.to_numeric(train_data['hours'], errors = 'coerce')
+dev_data['hours'] = pd.to_numeric(dev_data['hours'], errors = 'coerce')
 
 # Drop rows where 'hours' is NaN so that median computation is valid
-train_data = train_data.dropna(subset=['hours'])
-dev_data = dev_data.dropna(subset=['hours'])
+train_data = train_data.dropna(subset = ['hours'])
+dev_data = dev_data.dropna(subset = ['hours'])
 # -------------------------------
 # End Debugging Section
 # -------------------------------
@@ -118,7 +118,7 @@ dummy_pred = dummy_pipeline.predict(dev_data[features].values)
 dummy_accuracy, dummy_over, dummy_under = evaluate_classification(dev_data['target_class'].values, dummy_pred)
 
 print("\nDummy Classifier Performance:")
-print("Accuracy:", dummy_accuracy)
+print(f"Accuracy: {dummy_accuracy:.2f}")
 print("Over:", dummy_over)
 print("Under:", dummy_under)
 print(f"Training Time: {dummy_end:.2f} seconds.\n")
@@ -138,7 +138,7 @@ baseline_pred = baseline_pipeline.predict(dev_data[features].values)
 baseline_accuracy, baseline_over, baseline_under = evaluate_classification(dev_data['target_class'].values, baseline_pred)
 
 print("Baseline Classifier (Logistic Regression) Performance:")
-print("Accuracy:", baseline_accuracy)
+print(f"Accuracy: {baseline_accuracy:.2f}" )
 print("Over:", baseline_over)
 print("Under:", baseline_under)
 print(f"Training Time: {base_end:.2f} seconds.\n")
@@ -171,6 +171,11 @@ exp1_pipeline = Pipeline([
     ('scaler', StandardScaler()),
     ('classifier', LogisticRegression(max_iter=1000))
 ])
+
+# Debugging: Check the distribution
+print("Experiment 1: Distribution in training data (<= 2014):")
+print(train_2014['target_class'].value_counts())
+
 exp1_start = time.time() # Start timer for experiment 1 
 exp1_pipeline.fit(train_2014[features_exp].values, train_2014['target_class'].values)
 exp1_end = time.time() - exp1_start # Measure experiment 1 training time 
@@ -178,7 +183,7 @@ exp1_pred = exp1_pipeline.predict(test_2015[features_exp].values)
 exp1_accuracy, exp1_over, exp1_under = evaluate_classification(test_2015['target_class'].values, exp1_pred)
 
 print("Experiment 1: Train on reviews (<= 2014), test on reviews (>= 2015)")
-print("Accuracy:", exp1_accuracy)
+print(f"Accuracy: {exp1_accuracy:.2f}")
 print("Over:", exp1_over)
 print("Under:", exp1_under)
 print(f"Training Time: {exp1_end:.2f} seconds.\n")
@@ -203,7 +208,7 @@ exp2_pred = exp2_pipeline.predict(test_2014[features_exp].values)
 exp2_accuracy, exp2_over, exp2_under = evaluate_classification(test_2014['target_class'].values, exp2_pred)
 
 print("Experiment 2: Train on reviews (>= 2015), test on reviews (<= 2014)")
-print("Accuracy:", exp2_accuracy)
+print(f"Accuracy: {exp2_accuracy:.2f}" )
 print("Overpredictions:", exp2_over)
 print("Underpredictions:", exp2_under)
 print(f"Training Time: {exp2_end:.2f} seconds.\n")
