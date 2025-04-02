@@ -20,6 +20,7 @@ Author: Dario Santiago Lopez, Anthony Roca, and ChatGPT
 Date: April 2, 2025
 """
 
+import os
 import json
 import gzip
 import numpy as np 
@@ -33,11 +34,12 @@ from sklearn.model_selection import GridSearchCV, cross_val_score, train_test_sp
 import pickle 
 import time 
 
-# --- 1. Data Loading --- 
-
+# -------------------------------
+# 1. Data Loading
+# -------------------------------
 print("Estimation.py")
-print("Loading data...")
 print("--------------------")
+print("Loading data...")
 
 # Start timer for data loading 
 data_start = time.time()
@@ -57,8 +59,9 @@ print(f"Data loaded in {data_end:.2f} seconds.\n")
 # Convert the list to a DataFrame 
 df = pd.DataFrame(dataset) 
 
-# --- 2. Data Split ---
-
+# -------------------------------
+# 2. Data Split
+# -------------------------------
 # code to split the data (decided to use Pandas since it's more convenient for feature engineering)
 split_idx = int(len(df) * 0.8) 
 train_data = df.iloc[:split_idx].copy() 
@@ -68,8 +71,9 @@ dev_data = df.iloc[split_idx:].copy()
 train_data['year'] = pd.to_datetime(train_data['date']).dt.year 
 dev_data['year'] = pd.to_datetime(dev_data['date']).dt.year 
 
-# --- 3. Feature Engineering --- 
-
+# -------------------------------
+# 3. Feature Engineering 
+# -------------------------------
 # Compute review word count as a feature 
 train_data['review_word_count'] = train_data['text'].apply(lambda x: len(x.split()))
 dev_data['review_word_count'] = dev_data['text'].apply(lambda x: len(x.split()))
@@ -97,8 +101,9 @@ X_dev = imputer.transform(dev_data[features].values)
 y_train = train_data[target].values
 y_dev = dev_data[target].values
 
-# --- 4. Define Evaluation Metric --- 
-
+# -------------------------------
+# 4. Define Evaluation Metric 
+# -------------------------------
 def evaluate_model(y_true, y_pred): 
     """
     Evaluate the model using MSE and count the number of instances where the prediction is over/under the true value 
@@ -108,8 +113,9 @@ def evaluate_model(y_true, y_pred):
     over = np.sum(y_pred > y_true) 
     return mse, under, over 
 
-# --- 5. Model-Centric Approaches --- 
-
+# -------------------------------
+# 5. Model-Centric Approaches 
+# -------------------------------
 # 5.1. Baseline Model 
 model_baseline = LinearRegression() 
 
@@ -119,10 +125,10 @@ baseline_end = time.time() - baseline_start     # Measure baseline model trainin
 
 pred_baseline = model_baseline.predict(X_dev) 
 mse_base, under_base, over_base = evaluate_model(y_dev, pred_baseline) 
-print(f"Baseline Model Evaluation:")
+print("Baseline Model Evaluation:")
 print(f"MSE: {mse_base:.2f}")
-print(f"Under: {under_base}")
-print(f"Over: {over_base}")
+print("Under: ", under_base)
+print("Over: ", over_base)
 print(f"Training Time: {baseline_end:.2f} seconds.\n")
 
 # 5.2. Linear Regression with removed outliers 
@@ -141,10 +147,10 @@ mask_end = time.time() - mask_start         # Measure model training time
 
 pred_mask = mask_model.predict(X_dev) 
 mse_mask, under_mask, over_mask = evaluate_model(y_dev, pred_mask) 
-print(f"Linear Regression Model w/o Top 10% Outliers:")
+print("Linear Regression Model w/o Top 10% Outliers:")
 print(f"MSE: {mse_mask:.2f}")
-print(f"Under: {under_mask}")
-print(f"Over: {over_mask}")
+print("Under: ", under_mask)
+print("Over: ", over_mask)
 print(f"Training time: {mask_end:.2f} seconds.\n")
 
 # 5.3. Log transformation of target variable 
@@ -157,14 +163,13 @@ log_end = time.time() - log_start           # Measure model training time
 
 pred_log = np.power(2, model_log.predict(X_dev)) - 1
 mse_log, under_log, over_log = evaluate_model(y_dev, pred_log) 
-print(f"Model with Log Transformation of Target:")
+print("Model with Log Transformation of Target:")
 print(f"MSE: {mse_log:.2f}")
-print(f"Under: {under_log}")
-print(f"Over: {over_log}")
+print("Under: ", under_log)
+print("Over: ", over_log)
 print(f"Training time: {log_end:.2f} seconds.\n")
 
 # 5.4. Pipeline with StandardScaler 
-
 pipeline = Pipeline([ 
     ('imputer', SimpleImputer(strategy = 'mean')), 
     ('scaler', StandardScaler()), 
@@ -181,12 +186,11 @@ pred_pipeline = pipeline.predict(dev_data[features].values)
 mse_pipeline, under_pipeline, over_pipeline = evaluate_model(y_dev, pred_pipeline) 
 print("Pipeline Model w Imputer and StandardScaler:")
 print(f"MSE: {mse_pipeline:.2f}")
-print(f"Under: {under_pipeline:.2f}")
-print(f"Over: {over_pipeline:.2f}")
+print("Under: ", under_pipeline)
+print("Over: ", over_pipeline)
 print(f"Training time: {pipe_end:.2f} seconds. \n")
 
 # 5.5. ElasticNet with GridSeearchCV 
-
 # Set up the pipeline with ElasticNet
 pipeline_en = Pipeline([ 
     ('imputer', SimpleImputer(strategy = 'mean')), 
@@ -201,9 +205,7 @@ param_grid = {
 }
 
 # Set up the grid search 
-grid_search = GridSearchCV(pipeline_en, param_grid, cv = 5,
-                           scoring = 'neg_mean_squared_error',
-                           verbose = 2, n_jobs = -1)
+grid_search = GridSearchCV(pipeline_en, param_grid, cv=5, scoring='neg_mean_squared_error', verbose=0, n_jobs=-1)
 
 # Fit the grid search on the training data and take the time 
 grid_start = time.time()
@@ -217,13 +219,19 @@ mse_en, under_en, over_en = evaluate_model(y_dev, pred_en)
 print("ElasticNet Model with Hyperparameter Tuning:")
 print(f"Best Parameters: {grid_search.best_params_}")
 print(f"MSE: {mse_en:.2f}")
-print(f"Underpredictions: {under_en:.2f}")
-print(f"Overpredictions: {over_en:.2f}")
+print("Under: ", under_en)
+print("Over: ", over_en)
 print(f"Training time: {grid_end:.2f} seconds.\n")
 
-# --- 6. Saving and Testing the Best Pipeline ---
+# -------------------------------
+# 6. Saving and Testing the Best Pipeline 
+# -------------------------------
+# Define the output directory and the full path for the saved pipeline.
+output_dir = "/deac/csc/classes/csc373/santds21/assignment_5/output"
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+pipeline_path = os.path.join(output_dir, "best_pipeline.pkl")
 
-# Assume that based on your criteria the log-transformed model is the best.
 # Save the model pipeline.
 with open("best_pipeline.pkl", "wb") as f:
     pickle.dump(model_log, f)
@@ -233,10 +241,12 @@ with open("best_pipeline.pkl", "rb") as f:
     loaded_model = pickle.load(f)
 
 # Predict using the loaded model (remember to invert the log-transform)
+pred_start = time.time() 
 pred_loaded = np.power(2, loaded_model.predict(X_dev)) - 1
+pred_end = time.time() - pred_start
 mse_loaded, under_loaded, over_loaded = evaluate_model(y_dev, pred_loaded)
 print("Loaded Pipeline Evaluation:")
-print("MSE:", mse_loaded)
-print("Underpredictions:", under_loaded)
-print("Overpredictions:", over_loaded)
-print("")
+print(f"MSE: {mse_loaded:.2f}")
+print("Under:", under_loaded)
+print("Over:", over_loaded)
+print(f"Training time: {pred_end:.2f} seconds.\n")
