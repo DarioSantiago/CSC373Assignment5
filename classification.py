@@ -24,14 +24,14 @@ from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler
 from sklearn.metrics import accuracy_score
+from sklearn.ensemble import RandomForestClassifier
 import time 
 
 # -------------------------------
-# 1. Binarize Target Feature for Classification
+# 1. Binarize Target Feature for Classification + Data Cleaning 
 # -------------------------------
-
 print("\nClassification.py")
 print("--------------------")
 print("Loading data...")
@@ -63,9 +63,6 @@ dev_data = df.iloc[split_idx:].copy()
 train_data['year'] = pd.to_datetime(train_data['date']).dt.year 
 dev_data['year'] = pd.to_datetime(dev_data['date']).dt.year 
 
-# -------------------------------
-# Debugging: Ensure 'hours' is numeric and remove missing values
-# -------------------------------
 # Convert 'hours' to numeric (if not already) and coerce errors to NaN
 train_data['hours'] = pd.to_numeric(train_data['hours'], errors = 'coerce')
 dev_data['hours'] = pd.to_numeric(dev_data['hours'], errors = 'coerce')
@@ -73,9 +70,6 @@ dev_data['hours'] = pd.to_numeric(dev_data['hours'], errors = 'coerce')
 # Drop rows where 'hours' is NaN so that median computation is valid
 train_data = train_data.dropna(subset = ['hours'])
 dev_data = dev_data.dropna(subset = ['hours'])
-# -------------------------------
-# End Debugging Section
-# -------------------------------
 
 # Compute review word count as a feature 
 train_data['review_word_count'] = train_data['text'].apply(lambda x: len(x.split()))
@@ -104,16 +98,18 @@ def evaluate_classification(y_true, y_pred):
 # -------------------------------
 # 2.0 Dummy Classifier Pipeline
 # -------------------------------
-
 # Dummy classifier to establish a baseline 
 dummy_pipeline = Pipeline([
     ('imputer', SimpleImputer(strategy = 'mean')),
     ('scaler', StandardScaler()),
     ('dummy', DummyClassifier(strategy = 'most_frequent'))
 ])
+# Train the dummy classifier
 dummy_start = time.time() # Start timer for dummy classifier training 
 dummy_pipeline.fit(train_data[features].values, train_data['target_class'].values)
 dummy_end = time.time() - dummy_start # Measure dummy classifier training time 
+
+# Make predictions on the dev set
 dummy_pred = dummy_pipeline.predict(dev_data[features].values)
 dummy_accuracy, dummy_over, dummy_under = evaluate_classification(dev_data['target_class'].values, dummy_pred)
 
@@ -128,12 +124,15 @@ print(f"Training Time: {dummy_end:.2f} seconds.\n")
 # -------------------------------
 baseline_pipeline = Pipeline([
     ('imputer', SimpleImputer(strategy='mean')),
-    ('scaler', StandardScaler()),
+    ('scaler', MinMaxScaler()),
     ('classifier', LogisticRegression(max_iter=1000))
 ])
+# Train the baseline model
 base_start = time.time() # Start timer for baseline model training 
 baseline_pipeline.fit(train_data[features].values, train_data['target_class'].values)
 base_end = time.time() - base_start # Measure baseline model training time
+
+# Make predictions on the dev set
 baseline_pred = baseline_pipeline.predict(dev_data[features].values)
 baseline_accuracy, baseline_over, baseline_under = evaluate_classification(dev_data['target_class'].values, baseline_pred)
 
@@ -143,10 +142,33 @@ print("Over:", baseline_over)
 print("Under:", baseline_under)
 print(f"Training Time: {base_end:.2f} seconds.\n")
 
+#--------------------------------
+# 2.2 Random Forest Classifier Pipeline (just for fun)
+# -------------------------------- 
+# rf_pipe = Pipeline([ 
+#     ('imputer', SimpleImputer(strategy = 'mean')), 
+#     ('scaler', StandardScaler()), 
+#     ('classifier', RandomForestClassifier(n_estimators = 100, random_state = 42))
+# ])
+
+# # Train the Random Forest model 
+# rf_start = time.time() # Start timer for RF model training 
+# rf_pipe.fit(train_data[features].values, train_data['target_class'].values)
+# rf_end = time.time() - rf_start # Measure RF model training time 
+
+# # Make predictions on the dev set 
+# rf_pred = rf_pipe.predict(dev_data[features].values)
+# rf_accuracy, rf_over, rf_under = evaluate_classification(dev_data['target_class'].values, rf_pred)
+
+# print("Random Forest Classifier Performance: ")
+# print(f"Accuracy: {rf_accuracy:.2f}")
+# print("Over: ", rf_over)
+# print("Under: ", rf_under)
+# print(f"Training Time: {rf_end:.2f} seconds. \n")
+
 # -------------------------------
 # 3.0 Data-Centric Experiments Based on Review Year
 # -------------------------------
-
 # Combine train and dev data for experiments 
 all_data = pd.concat([train_data, dev_data], axis = 0, ignore_index = True) 
 training_avg = median_hours # Use the median hours from the training data for consistency
@@ -165,7 +187,7 @@ test_2015 = all_data[all_data['year'] >= 2015]
 
 exp1_pipeline = Pipeline([
     ('imputer', SimpleImputer(strategy = 'mean')),
-    ('scaler', StandardScaler()),
+    ('scaler', MinMaxScaler()),
     ('classifier', LogisticRegression(max_iter = 1000))
 ])
 
@@ -174,10 +196,12 @@ exp1_pipeline = Pipeline([
 # print("Experiment 1: Distribution in training data (<= 2014):")
 # print(train_2014['target_class'].value_counts())
 # --------------------------------- 
-
+# Train on reviews from 2014 or earlier, test on reviews from 2015 or later
 exp1_start = time.time() # Start timer for experiment 1 
 exp1_pipeline.fit(train_2014[features_exp].values, train_2014['target_class'].values)
-exp1_end = time.time() - exp1_start # Measure experiment 1 training time 
+exp1_end = time.time() - exp1_start # Measure experiment 1 training time
+
+# Make predictions on the test set 
 exp1_pred = exp1_pipeline.predict(test_2015[features_exp].values)
 exp1_accuracy, exp1_over, exp1_under = evaluate_classification(test_2015['target_class'].values, exp1_pred)
 
@@ -196,13 +220,15 @@ test_2014 = all_data[all_data['year'] <= 2014]
 
 exp2_pipeline = Pipeline([
     ('imputer', SimpleImputer(strategy='mean')),
-    ('scaler', StandardScaler()),
+    ('scaler', MinMaxScaler()),
     ('classifier', LogisticRegression(max_iter=1000))
 ])
-
+# Train on reviews from 2015 or later, test on reviews from 2014 or earlier 
 exp2_start = time.time() # Start timer for exp2 
 exp2_pipeline.fit(train_2015[features_exp].values, train_2015['target_class'].values)
 exp2_end = time.time() - exp2_start # Measure exp2 training time
+
+# Make predictions on the test set 
 exp2_pred = exp2_pipeline.predict(test_2014[features_exp].values)
 exp2_accuracy, exp2_over, exp2_under = evaluate_classification(test_2014['target_class'].values, exp2_pred)
 
