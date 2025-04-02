@@ -107,9 +107,9 @@ def evaluate_classification(y_true, y_pred):
 
 # Dummy classifier to establish a baseline 
 dummy_pipeline = Pipeline([
-    ('imputer', SimpleImputer(strategy='mean')),
+    ('imputer', SimpleImputer(strategy = 'mean')),
     ('scaler', StandardScaler()),
-    ('dummy', DummyClassifier(strategy='most_frequent'))
+    ('dummy', DummyClassifier(strategy = 'most_frequent'))
 ])
 dummy_start = time.time() # Start timer for dummy classifier training 
 dummy_pipeline.fit(train_data[features].values, train_data['target_class'].values)
@@ -146,14 +146,11 @@ print(f"Training Time: {base_end:.2f} seconds.\n")
 # -------------------------------
 # 3.0 Data-Centric Experiments Based on Review Year
 # -------------------------------
-# Use the full original DataFrame 'df'
-all_data = df.copy()
-all_data['date'] = pd.to_datetime(all_data['date'])
-all_data['year'] = all_data['date'].dt.year
 
-# Compute overall median (or you can choose training median) for binarization
-overall_median = np.median(all_data['hours'].values)
-all_data['target_class'] = (all_data['hours'] > overall_median).astype(int)
+# Combine train and dev data for experiments 
+all_data = pd.concat([train_data, dev_data], axis = 0, ignore_index = True) 
+training_avg = median_hours # Use the median hours from the training data for consistency
+all_data['target_class'] = (all_data['hours'] > training_avg).astype(int)
 
 # Ensure necessary features exist; add review_word_count if not already present
 if 'review_word_count' not in all_data.columns:
@@ -167,14 +164,16 @@ train_2014 = all_data[all_data['year'] <= 2014]
 test_2015 = all_data[all_data['year'] >= 2015]
 
 exp1_pipeline = Pipeline([
-    ('imputer', SimpleImputer(strategy='mean')),
+    ('imputer', SimpleImputer(strategy = 'mean')),
     ('scaler', StandardScaler()),
-    ('classifier', LogisticRegression(max_iter=1000))
+    ('classifier', LogisticRegression(max_iter = 1000))
 ])
 
+# -------------------------------
 # Debugging: Check the distribution
-print("Experiment 1: Distribution in training data (<= 2014):")
-print(train_2014['target_class'].value_counts())
+# print("Experiment 1: Distribution in training data (<= 2014):")
+# print(train_2014['target_class'].value_counts())
+# --------------------------------- 
 
 exp1_start = time.time() # Start timer for experiment 1 
 exp1_pipeline.fit(train_2014[features_exp].values, train_2014['target_class'].values)
@@ -209,6 +208,6 @@ exp2_accuracy, exp2_over, exp2_under = evaluate_classification(test_2014['target
 
 print("Experiment 2: Train on reviews (>= 2015), test on reviews (<= 2014)")
 print(f"Accuracy: {exp2_accuracy:.2f}" )
-print("Overpredictions:", exp2_over)
-print("Underpredictions:", exp2_under)
+print("Over:", exp2_over)
+print("Under:", exp2_under)
 print(f"Training Time: {exp2_end:.2f} seconds.\n")
