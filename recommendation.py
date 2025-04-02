@@ -24,8 +24,6 @@ import ast
 import json
 import gzip 
 import numpy as np
-import pandas as pd
-import pyspark.pandas as ps 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, log2, when, expr, count 
 from pyspark.ml.recommendation import ALS 
@@ -37,7 +35,6 @@ import time
 import warnings 
 warnings.filterwarnings("ignore")
 
-
 # ------------------------------------
 # 1. Create Spark Session and begin loading data 
 # ------------------------------------
@@ -45,17 +42,19 @@ print("\nRecommendation.py")
 print("--------------------")
 print("Loading data...\n")
 
-# Create spark session
+# Create spark session (orginially at 8g)
 spark = SparkSession.builder.appName("RecommendationPipeline") \
-    .config("spark.driver.memory", "8g") \
-    .config("spark.executor.memory", "8g") \
+    .config("spark.driver.memory", "16g") \
+    .config("spark.executor.memory", "16g") \
     .config("spark.broadcast.compress", "true") \
+    .config("spark.ui.showConsoleProgress", "false") \
+    .config("spark.sql.shuffle.partitions", "200") \
     .getOrCreate()
-spark.sparkContext.setLogLevel("WARN") # Used to get rid of warning messages 
+spark.sparkContext.setLogLevel("ERROR") # Used to get rid of warning messages
 
 # Begin loading data and measure time and define file paths
 input_path = "/deac/csc/classes/csc373/data/assignment_5/steam_reviews.json.gz"
-output_path = "steam_reviews_valid.json"
+output_path = "/deac/csc/classes/csc373/santds21/assignment_5/data/steam_reviews_valid.json"
 
 data_start = time.time() # Measure time to load data 
 
@@ -85,11 +84,7 @@ schema = StructType([
     StructField("page", IntegerType(), True)
 ])
 
-# Debugging 
 data = spark.read.schema(schema).json(output_path)
-# data.printSchema() 
-# data.show(5, truncate=False)
-
 data_end = time.time() - data_start 
 print(f"Data loaded in {data_end:.2f} seconds.")
 
@@ -100,29 +95,30 @@ data = data.filter(col("hours").isNotNull())
 # Create a new column for log-transformed hours: log2(hours + 1) 
 data = data.withColumn("log_hours", log2(col("hours") + 1))
 
-# --------Debugging---------------
-non_null_count = data.filter(col("log_hours").isNotNull()).count()
-# print("Count of non-null log_hours:", non_null_count)
-# --------End Debugging-------------
-
 # Create a datasubset to deal with memory issues during training 
-data_subset = 0.1
+data_subset = 1.0
 if data_subset < 1.0: 
     print(f"Using a subset of the data: {data_subset * 100:.0f}% of the total records.\n")
     data = data.sample(withReplacement = False, fraction = data_subset, seed = 42)
 
-
 # ------------------------------------
 # 2. Train/Development Split
 # ------------------------------------
-
 # Split data on an 80/20 split (consider randomSplit as well)
-total_count = data.count() 
-train_count = int(total_count * 0.8)
+# total_count = data.count() 
+# train_count = int(total_count * 0.8)
 
 # Use DataFrame.limit() and subtract for development 
-train_data = data.limit(train_count)
-dev_data = data.subtract(train_data) # This creates the dev set 
+# train_data = data.limit(train_count)
+# dev_data = data.subtract(train_data) # This creates the dev set 
+
+# Use randomSplit to randomly partition the data into 80% training and 20% development sets
+train_data, dev_data = data.randomSplit([0.8, 0.2], seed=42)
+train_data = train_data.repartition(100)
+
+# Print the counts to verify the split
+print("Training data count:", train_data.count())
+print("Development data count:", dev_data.count())
 
 # ------------------------------------
 # 3. Indexing User and Product IDs
@@ -134,7 +130,6 @@ product_indexer = StringIndexer(inputCol = "product_id", outputCol = "productInd
 # ------------------------------------
 # 4. ALS Model Setup 
 # ------------------------------------
-
 # Create ALS to fill in missing ratings 
 als = ALS( 
     userCol = "userIndex", 
@@ -142,9 +137,9 @@ als = ALS(
     ratingCol = "log_hours", 
     coldStartStrategy = "drop", # Drop predictions for unseen user/items 
     nonnegative = True, 
-    maxIter = 5, 
-    regParam = 0.1, 
-    rank = 5
+    maxIter = 10,               # Adjust for tuning
+    regParam = 0.1,             # Adjust for tuning
+    rank = 10                   # Adjust for tuning
 )
 
 # Build a Pipeline for indexing and ALS 
@@ -156,7 +151,7 @@ pipeline = Pipeline(stages = [user_indexer, product_indexer, als])
 time_start = time.time() # Measure how long it takes to train the model
 model = pipeline.fit(train_data)
 time_end = time.time() - time_start # Get total time 
-print(f"\nTraining Time: {time_end:.2f} seconds.\n")
+print(f"Training Time: {time_end:.2f} seconds.")
 
 # ------------------------------------
 # 6. Make Predicions on the Dev Set 
@@ -190,7 +185,8 @@ print(f"Under (count): {under}\n")
 # -------------------------------
 # 8. Save the Pipeline Model
 # -------------------------------
-# model.write().overwrite().save("best_recommendation_pipeline")
+output_dir = "/deac/csc/classes/csc373/santds21/assignment_5/output/best_recommendation_pipeline"
+model.write().overwrite().save(output_dir)
 
 # Stop the Spark session
 spark.stop()
