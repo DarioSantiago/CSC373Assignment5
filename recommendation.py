@@ -125,7 +125,7 @@ train_data = data.limit(train_count)
 dev_data = data.subtract(train_data) # This creates the dev set 
 
 # ------------------------------------
-# Indexing User and Product IDs
+# 3. Indexing User and Product IDs
 # ------------------------------------
 # Convert 'username' and 'product_id' to numeric function
 user_indexer = StringIndexer(inputCol = "username", outputCol = "userIndex", handleInvalid="skip")
