@@ -104,14 +104,6 @@ if data_subset < 1.0:
 # ------------------------------------
 # 2. Train/Development Split
 # ------------------------------------
-# Split data on an 80/20 split (consider randomSplit as well)
-# total_count = data.count() 
-# train_count = int(total_count * 0.8)
-
-# Use DataFrame.limit() and subtract for development 
-# train_data = data.limit(train_count)
-# dev_data = data.subtract(train_data) # This creates the dev set 
-
 # Use randomSplit to randomly partition the data into 80% training and 20% development sets
 train_data, dev_data = data.randomSplit([0.8, 0.2], seed=42)
 train_data = train_data.repartition(100)
