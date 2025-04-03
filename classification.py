@@ -142,30 +142,6 @@ print("Over:", baseline_over)
 print("Under:", baseline_under)
 print(f"Training Time: {base_end:.2f} seconds.\n")
 
-#--------------------------------
-# 2.2 Random Forest Classifier Pipeline (just for fun)
-# -------------------------------- 
-# rf_pipe = Pipeline([ 
-#     ('imputer', SimpleImputer(strategy = 'mean')), 
-#     ('scaler', StandardScaler()), 
-#     ('classifier', RandomForestClassifier(n_estimators = 100, random_state = 42))
-# ])
-
-# # Train the Random Forest model 
-# rf_start = time.time() # Start timer for RF model training 
-# rf_pipe.fit(train_data[features].values, train_data['target_class'].values)
-# rf_end = time.time() - rf_start # Measure RF model training time 
-
-# # Make predictions on the dev set 
-# rf_pred = rf_pipe.predict(dev_data[features].values)
-# rf_accuracy, rf_over, rf_under = evaluate_classification(dev_data['target_class'].values, rf_pred)
-
-# print("Random Forest Classifier Performance: ")
-# print(f"Accuracy: {rf_accuracy:.2f}")
-# print("Over: ", rf_over)
-# print("Under: ", rf_under)
-# print(f"Training Time: {rf_end:.2f} seconds. \n")
-
 # -------------------------------
 # 3.0 Data-Centric Experiments Based on Review Year
 # -------------------------------
@@ -191,11 +167,6 @@ exp1_pipeline = Pipeline([
     ('classifier', LogisticRegression(max_iter = 1000))
 ])
 
-# -------------------------------
-# Debugging: Check the distribution
-# print("Experiment 1: Distribution in training data (<= 2014):")
-# print(train_2014['target_class'].value_counts())
-# --------------------------------- 
 # Train on reviews from 2014 or earlier, test on reviews from 2015 or later
 exp1_start = time.time() # Start timer for experiment 1 
 exp1_pipeline.fit(train_2014[features_exp].values, train_2014['target_class'].values)
