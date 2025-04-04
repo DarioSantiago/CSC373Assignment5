@@ -12,173 +12,164 @@ It makes predictions of log-transformed hours played for a user by leveraging co
   
 Acknowledgements:
 This project is part of a Computer Science course on Data Mining.
-Special thanks to the CSC373 faculty for their guidance and for providing the dataset.
+Special thanks to Dr. Khuri for guidance and for providing the dataset.
 
 Author: Dario Santiago Lopez, Anthony Roca, and ChatGPT
 Date: April 2, 2025
 """ 
 
 import os
-os.environ["PYARROW_IGNORE_TIMEZONE"] = "1"
 import ast
 import json
-import gzip 
+import gzip
+import time
 import numpy as np
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, log2, when, expr, count 
-from pyspark.ml.recommendation import ALS 
-from pyspark.ml.evaluation import RegressionEvaluator 
+from pyspark.sql.functions import col, log2, when
+from pyspark.ml.recommendation import ALS
+from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.feature import StringIndexer
-from pyspark.ml import Pipeline
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, FloatType 
-import time 
-import warnings 
-warnings.filterwarnings("ignore")
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, FloatType
 
-# ------------------------------------
-# 1. Create Spark Session and begin loading data 
-# ------------------------------------
-print("\nRecommendation.py")
-print("--------------------")
-print("Loading data...\n")
+# Configuration
+INPUT_PATH = "/deac/csc/classes/csc373/data/assignment_5/steam_reviews.json.gz"
+JSON_PATH = "/deac/csc/classes/csc373/rocaaj21/assignment_5/data/steam_reviews_valid.json"
+OUTPUT_DIR = "/deac/csc/classes/csc373/rocaaj21/assignment_5/output/best_recommendation_pipeline"
+os.environ["PYARROW_IGNORE_TIMEZONE"] = "1"
 
-# Create spark session (orginially at 8g)
-spark = SparkSession.builder.appName("RecommendationPipeline") \
-    .config("spark.driver.memory", "16g") \
-    .config("spark.executor.memory", "16g") \
-    .config("spark.broadcast.compress", "true") \
-    .config("spark.ui.showConsoleProgress", "false") \
-    .config("spark.sql.shuffle.partitions", "200") \
-    .getOrCreate()
-spark.sparkContext.setLogLevel("ERROR") # Used to get rid of warning messages
+# Utility Functions
+def preprocess_json(input_path, output_path):
+    if not os.path.exists(output_path):
+        print("Preprocessing file to create valid JSON...")
+        with gzip.open(input_path, "rt", encoding="utf-8") as fin, open(output_path, "w", encoding="utf-8") as fout:
+            for line in fin:
+                try:
+                    record = ast.literal_eval(line.strip())
+                    json_record = json.dumps(record)
+                    fout.write(json_record + "\n")
+                except Exception as e:
+                    print("Error processing line:", e)
+        print("Preprocessing complete.\n")
 
-# Begin loading data and measure time and define file paths
-input_path = "/deac/csc/classes/csc373/data/assignment_5/steam_reviews.json.gz"
-output_path = "/deac/csc/classes/csc373/santds21/assignment_5/data/steam_reviews_valid.json"
+def create_spark_session():
+    spark = SparkSession.builder.appName("RecommendationPipeline") \
+        .config("spark.driver.memory", "16g") \
+        .config("spark.executor.memory", "16g") \
+        .config("spark.broadcast.compress", "true") \
+        .config("spark.ui.showConsoleProgress", "false") \
+        .config("spark.sql.shuffle.partitions", "200") \
+        .getOrCreate()
+    spark.sparkContext.setLogLevel("ERROR")
+    return spark
 
-data_start = time.time() # Measure time to load data 
+def load_and_prepare_data(spark, path):
+    schema = StructType([
+        StructField("username", StringType(), True),
+        StructField("hours", FloatType(), True),
+        StructField("products", IntegerType(), True),
+        StructField("product_id", StringType(), True),
+        StructField("page_order", IntegerType(), True),
+        StructField("date", StringType(), True),
+        StructField("text", StringType(), True),
+        StructField("early_access", IntegerType(), True),
+        StructField("page", IntegerType(), True)
+    ])
+    data = spark.read.schema(schema).json(path)
+    data = data.withColumn("hours", col("hours").cast(FloatType()))
+    data = data.filter(col("hours").isNotNull())
+    data = data.withColumn("log_hours", log2(col("hours") + 1))
+    return data
 
-# Preprocess the file if the valid JSON file does not exist
-if not os.path.exists(output_path):
-    print("Preprocessing file to create valid JSON...")
-    with gzip.open(input_path, "rt", encoding="utf-8") as fin, open(output_path, "w", encoding="utf-8") as fout:
-        for line in fin:
-            try:
-                record = ast.literal_eval(line.strip())
-                json_record = json.dumps(record)
-                fout.write(json_record + "\n")
-            except Exception as e:
-                print("Error processing line:", e)
-    print("Preprocessing complete.\n")
+def evaluate_predictions(predictions):
+    evaluator = RegressionEvaluator(labelCol="log_hours", predictionCol="prediction", metricName="mse")
+    mse = evaluator.evaluate(predictions)
+    predictions = predictions.withColumn("over_pred", when(col("prediction") > col("log_hours"), 1).otherwise(0))
+    predictions = predictions.withColumn("under_pred", when(col("prediction") < col("log_hours"), 1).otherwise(0))
+    over = predictions.groupBy().sum("over_pred").collect()[0][0]
+    under = predictions.groupBy().sum("under_pred").collect()[0][0]
+    return mse, over, under
 
-# Create schema to read json file
-schema = StructType([
-    StructField("username", StringType(), True),
-    StructField("hours", FloatType(), True),
-    StructField("products", IntegerType(), True),
-    StructField("product_id", StringType(), True),
-    StructField("page_order", IntegerType(), True),
-    StructField("date", StringType(), True),
-    StructField("text", StringType(), True),
-    StructField("early_access", IntegerType(), True),
-    StructField("page", IntegerType(), True)
-])
+def run_recommendation():
+    print("\nRecommendation.py")
+    print("--------------------")
+    print("Loading data...\n")
 
-data = spark.read.schema(schema).json(output_path)
-data_end = time.time() - data_start 
-print(f"Data loaded in {data_end:.2f} seconds.")
+    preprocess_json(INPUT_PATH, JSON_PATH)
+    spark = create_spark_session()
 
-# Convert hours to float (consider just keeping them integers as well) and filter out rows with missing hours 
-data = data.withColumn("hours", col("hours").cast(FloatType()))
-data = data.filter(col("hours").isNotNull())
+    data_start = time.time()
+    data = load_and_prepare_data(spark, JSON_PATH)
+    data_subset = 0.2  # Use 20% of the data
+    if data_subset < 1.0:
+        print(f"Using a subset of the data: {data_subset * 100:.0f}%")
+        data = data.sample(withReplacement=False, fraction=data_subset, seed=42)
 
-# Create a new column for log-transformed hours: log2(hours + 1) 
-data = data.withColumn("log_hours", log2(col("hours") + 1))
+    data_end = time.time() - data_start
+    print(f"Data loaded in {data_end:.2f} seconds.")
 
-# Create a datasubset to deal with memory issues during training 
-data_subset = 1.0
-if data_subset < 1.0: 
-    print(f"Using a subset of the data: {data_subset * 100:.0f}% of the total records.\n")
-    data = data.sample(withReplacement = False, fraction = data_subset, seed = 42)
+    train_data, dev_data = data.randomSplit([0.8, 0.2], seed=42)
+    train_data = train_data.repartition(100)
+    print("Training data count:", train_data.count())
+    print("Development data count:", dev_data.count())
 
-# ------------------------------------
-# 2. Train/Development Split
-# ------------------------------------
-# Use randomSplit to randomly partition the data into 80% training and 20% development sets
-train_data, dev_data = data.randomSplit([0.8, 0.2], seed=42)
-train_data = train_data.repartition(100)
+    # --- Break apart indexing and ALS manually ---
+    print("Indexing users and products...")
 
-# Print the counts to verify the split
-print("Training data count:", train_data.count())
-print("Development data count:", dev_data.count())
+    user_indexer = StringIndexer(inputCol="username", outputCol="userIndex", handleInvalid="skip")
+    product_indexer = StringIndexer(inputCol="product_id", outputCol="productIndex", handleInvalid="skip")
 
-# ------------------------------------
-# 3. Indexing User and Product IDs
-# ------------------------------------
-# Convert 'username' and 'product_id' to numeric function
-user_indexer = StringIndexer(inputCol = "username", outputCol = "userIndex", handleInvalid="skip")
-product_indexer = StringIndexer(inputCol = "product_id", outputCol = "productIndex", handleInvalid="skip")
+    user_indexer_model = user_indexer.fit(train_data)
+    train_data_indexed = user_indexer_model.transform(train_data)
 
-# ------------------------------------
-# 4. ALS Model Setup 
-# ------------------------------------
-# Create ALS to fill in missing ratings 
-als = ALS( 
-    userCol = "userIndex", 
-    itemCol = "productIndex", 
-    ratingCol = "log_hours", 
-    coldStartStrategy = "drop", # Drop predictions for unseen user/items 
-    nonnegative = True, 
-    maxIter = 10,               # Adjust for tuning
-    regParam = 0.1,             # Adjust for tuning
-    rank = 10                   # Adjust for tuning
-)
+    product_indexer_model = product_indexer.fit(train_data_indexed)
+    train_data_indexed = product_indexer_model.transform(train_data_indexed)
 
-# Build a Pipeline for indexing and ALS 
-pipeline = Pipeline(stages = [user_indexer, product_indexer, als])
+    # ALS setup
+    als = ALS(
+        userCol="userIndex",
+        itemCol="productIndex",
+        ratingCol="log_hours",
+        coldStartStrategy="drop",
+        nonnegative=True,
+        maxIter=10,
+        regParam=0.1,
+        rank=10
+    )
 
-# ------------------------------------
-# 5. Train Recommendation Model 
-# ------------------------------------
-time_start = time.time() # Measure how long it takes to train the model
-model = pipeline.fit(train_data)
-time_end = time.time() - time_start # Get total time 
-print(f"Training Time: {time_end:.2f} seconds.")
+    print("Training ALS model...")
+    start = time.time()
+    als_model = als.fit(train_data_indexed)
+    train_time = time.time() - start
+    print(f"Training Time: {train_time:.2f} seconds.")
 
-# ------------------------------------
-# 6. Make Predicions on the Dev Set 
-# ------------------------------------
-predictions = model.transform(dev_data)
+    dev_indexed = user_indexer_model.transform(dev_data)
+    dev_indexed = product_indexer_model.transform(dev_indexed)
 
-# ------------------------------------
-# 7. Evaulate Model 
-# ------------------------------------
-# Predictions DataFrame should now contain a "prediction" column (log_hours predicted)
-evaluator = RegressionEvaluator( 
-    labelCol = "log_hours", 
-    predictionCol = "prediction", 
-    metricName = "mse"
-)
-mse = evaluator.evaluate(predictions)
-print(f"Recommendation Model MSE (log_hours): {mse:.2f}")
-# Compute overpredictions and underpredictions on log_hours 
-# Overprediction: prediction > true log_hours, Underprediction: prediction < true log_hours.
-predictions = predictions.withColumn(
-    "over_pred", when(col("prediction") > col("log_hours"), 1).otherwise(0)
-).withColumn(
-    "under_pred", when(col("prediction") < col("log_hours"), 1).otherwise(0)
-)
+    predictions = als_model.transform(dev_indexed)
 
-over = predictions.groupBy().sum("over_pred").collect()[0][0]
-under = predictions.groupBy().sum("under_pred").collect()[0][0]
-print("Over (count): ", over)
-print(f"Under (count): {under}\n")
+    mse, over, under = evaluate_predictions(predictions)
+    print(f"Recommendation Model MSE (log_hours): {mse:.2f}")
+    print("Over (count):", over)
+    print("Under (count):", under)
 
-# -------------------------------
-# 8. Save the Pipeline Model
-# -------------------------------
-output_dir = "/deac/csc/classes/csc373/santds21/assignment_5/output/best_recommendation_pipeline"
-model.write().overwrite().save(output_dir)
+    # Save components separately
+    user_indexer_model.write().overwrite().save(os.path.join(OUTPUT_DIR, "user_indexer"))
+    product_indexer_model.write().overwrite().save(os.path.join(OUTPUT_DIR, "product_indexer"))
+    als_model.write().overwrite().save(os.path.join(OUTPUT_DIR, "als_model"))
 
-# Stop the Spark session
-spark.stop()
+    report_lines = [
+        "Recommendation Task Results",
+        "============================",
+        f"MSE (log_hours): {mse:.2f}",
+        f"Overpredicted: {over}",
+        f"Underpredicted: {under}"
+    ]
+    with open(os.path.join(OUTPUT_DIR, "recommendation_results.txt"), "w") as f:
+        for line in report_lines:
+            print(line)
+            f.write(line + "\n")
+
+    spark.stop()
+
+if __name__ == "__main__":
+    run_recommendation()
