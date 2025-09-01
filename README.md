@@ -8,6 +8,7 @@ It was developed as part of CSC-373 (Data Mining) coursework and designed to han
 The pipeline trains on Steam review data to produce recommendations while managing memory efficiency, data shuffling, and parallel computation through Spark configuration tuning.
 
 📂 Project Structure
+
 assignment_5/
 │
 ├── scripts/
@@ -41,11 +42,13 @@ Model Persistence: Saves trained pipelines for re-use without retraining.
 Local & Cluster Execution: Runs on both local machines and HPC environments.
 
 📊 Results (Example from HPC Run)
+
 Metric	Value
 MSE (log_hours)	6.60
 Overpredictions (count)	28,700
 Underpredictions (count)	90,088
 Training Time (Full Data)	~13 min
+
 🚀 How to Run
 1️⃣ Local Execution
 python scripts/recommendation.py
