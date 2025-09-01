@@ -1,4 +1,5 @@
 Steam Game Hours Recommendation Pipeline
+
 📌 Overview
 
 This project implements a collaborative filtering recommendation system using PySpark's ALS (Alternating Least Squares) algorithm to predict log-transformed hours played for a user based on the preferences of other, similar users.
